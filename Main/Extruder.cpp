@@ -1,4 +1,4 @@
-//this is the overall code
+//this is the overall code for the extruder
 
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
