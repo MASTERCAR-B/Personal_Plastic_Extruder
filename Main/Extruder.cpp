@@ -1,168 +1,290 @@
-//this is the overall code for the extruder
+/*
+    ______     __                                          __        ____  __               __  _          
+   / ____/  __/ /________  ___________  _________ _   ____/ /__     / __ \/ /   ____ ______/ /_(_)________ 
+  / __/ | |/_/ __/ ___/ / / / ___/ __ \/ ___/ __ `/  / __  / _ \   / /_/ / /   / __ `/ ___/ __/ / ___/ __ \
+ / /____>  </ /_/ /  / /_/ (__  ) /_/ / /  / /_/ /  / /_/ /  __/  / ____/ /___/ /_/ (__  ) /_/ / /__/ /_/ /
+/_____/_/|_|\__/_/   \__,_/____/\____/_/   \__,_/   \__,_/\___/  /_/   /_____/\__,_/____/\__/_/\___/\____/  
+
+https://github.com/MASTERCAR-B/Personal_Plastic_Extruder
+
+Cualquier modificacion deseada llamar a ZAVALETA lucaszavaleta10@gmail.com
+No modifique ninguna linea de codigo sin tener presente el conocimiento adecuado sobre los componentes de la maquina
+Ante cualquier duda comuniquese con el autor
+
+*/
 
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
-#include <math.h> // Include math library for logarithm calculations
-#include <PID_v1.h> // Include the PID library
+#include <math.h> 
+#include <PID_v1.h> 
 
-// LCD configuration
-// Initialize the LCD (I2C address: 0x27, 16 columns, 2 rows)
-LiquidCrystal_I2C lcd(0x27, 16, 2); // Change to 0x3f if 0x27 doesn't work
+LiquidCrystal_I2C lcd(0x27, 16, 2); 
 
-// Pin definitions
-const int thermistorPin = A3; // Analog pin where the thermistor is connected
-const int potPin = A2; // Analog pin connected to the potentiometer
-const int selectButtonPin = 3; // Digital pin connected to the select button
-const int ssrPin = 9; // Digital output pin to control the SSR (or LED for testing)
+const int thermistorPin = A1;  
+const int potPin = A4;        
+const int selectButtonPin = 31;
+const int ssrPin = 12;          
+const int greenButtonPin = 33; 
+const int redButtonPin = 35;   
+const int signalPin = 11;      
 
-// Variables
-float setpointTemperature = 25.0; // Initial setpoint temperature value
-bool editMode = false; // Edit mode flag
+int screenIndex = 0;            
+float setpointTemperature = 30.0; 
+float temperatura_buscada = 25.0;
+int velocidad_motor = 0;
+int offset = 48;
+bool isRunning = false;         
 
-// Variables to store the last button state (for debouncing)
-int lastSelectButtonState = HIGH;
+int potValueTemp = 0;
+int potValueMotor = 0;
+int potValueOffset = 0;
 
-// Thermistor constants and variables
-const float resistenciaNominal = 100000.0; // 100k ohm at 25 degrees Celsius
-const float resistorFijo = 4700.0; // 4.7k ohms
-const float B = 3950.0; // B constant of the thermistor
-const float A = 0.176323; // A constant for calculations
-
-// PID control variables
 double Setpoint, Input, Output;
 double Kp = 2.0, Ki = 5.0, Kd = 1.0; // PID tuning parameters
 
-// PID object
 PID myPID(&Input, &Output, &Setpoint, Kp, Ki, Kd, DIRECT);
 
-// Time-proportional control variables
+const float A = 0.176323;
+const float B = 3950.0;
+const float resistorFijo = 4700.0;
+
 unsigned long windowStartTime;
-const unsigned long windowSize = 1000; // 1-second window (adjusted for testing)
+const unsigned long windowSize = 5000; // 1-second window
+
+// PID variables from the first code
+double dt, last_time;
+double integral, previous, output = 0;
 
 void setup() {
   lcd.init();
   lcd.backlight();
 
-  // Set up the button pin with internal pull-up resistor
   pinMode(selectButtonPin, INPUT_PULLUP);
-
-  // Set up the SSR control pin (or LED for testing)
+  pinMode(greenButtonPin, INPUT_PULLUP);
+  pinMode(redButtonPin, INPUT_PULLUP);
   pinMode(ssrPin, OUTPUT);
+  pinMode(signalPin, OUTPUT);
 
-  // Initialize serial communication
-  Serial.begin(9600);
-
-  // Initialize PID
-  Setpoint = setpointTemperature; // Initial setpoint
+  Setpoint = setpointTemperature;
   myPID.SetMode(AUTOMATIC);
-  myPID.SetOutputLimits(0, windowSize); // Output limits correspond to window size
-  myPID.SetSampleTime(1000); // Sample time in milliseconds
+  myPID.SetOutputLimits(0, windowSize); 
+  myPID.SetSampleTime(1000);
 
-  // Initialize window start time
   windowStartTime = millis();
+  Serial.begin(9600);
 }
 
 void loop() {
-  // Read the current state of the select button
   int selectButtonState = digitalRead(selectButtonPin);
-
-  // Print the state of the button
   if (selectButtonState == LOW) {
-    Serial.println("Button Pressed");
-  } else {
-    Serial.println("Button Not Pressed");
-  }
-
-  // Check if the select button was pressed
-  if (selectButtonState == LOW && lastSelectButtonState == HIGH) {
-    editMode = !editMode; // Toggle edit mode
-
-    if (editMode) {
-      // Entering edit mode
-      lcd.clear();
-      lcd.setCursor(0, 0);
-      lcd.print("Adjust Setpoint");
-    } else {
-      // Exiting edit mode, clear the screen
-      lcd.clear();
+    screenIndex++;  
+    if (screenIndex > 5) {
+      screenIndex = 0;
     }
-    delay(200); // Debounce delay
+    delay(200);  
   }
-  lastSelectButtonState = selectButtonState;
 
-  if (editMode) {
-    // In edit mode, read the potentiometer and update setpoint temperature
-    int potValue = analogRead(potPin); // Read potentiometer value (0-1023)
-    // Map the potentiometer value to the desired temperature range (adjust as needed)
-    setpointTemperature = map(potValue, 0, 1023, 0, 100);
+  int greenButtonState = digitalRead(greenButtonPin);
+  if (greenButtonState == LOW && screenIndex == 4 && !isRunning) {
+    isRunning = true;
+    start();
+    delay(200); 
+  }
 
-    // Update the LCD to show the setpoint temperature
-    lcd.setCursor(0, 1);
-    lcd.print("Setpoint: ");
-    lcd.print(setpointTemperature, 1);
-    lcd.print(" C ");
-    delay(100); // Small delay to prevent flickering
-  } else {
-    // Not in edit mode, proceed with temperature control
+  int redButtonState = digitalRead(redButtonPin);
+  if (redButtonState == LOW && isRunning) {
+    isRunning = false;
+    stop(); 
+    delay(200); 
+  }
 
-    // Read the actual temperature from the thermistor
-    float temperature_read = readThermistor();
+  displayScreen();
 
-    // Update PID variables
-    Input = temperature_read; // Actual temperature
-    Setpoint = setpointTemperature; // Desired temperature
+  if (screenIndex == 1 || screenIndex == 2 || screenIndex == 3) {
+    if (screenIndex == 1) {
+      potValueTemp = analogRead(potPin); 
+      temperatura_buscada = map(potValueTemp, 0, 1023, 0, 240); 
+    }
+    if (screenIndex == 2) {
+      potValueMotor = analogRead(potPin);
+      velocidad_motor = map(potValueMotor, 0, 1023, 0, 60);  
+    }
+    if (screenIndex == 3) {
+      potValueOffset = analogRead(potPin);
+      offset = map(potValueOffset, 0, 1023, 0, 80); 
+    }
+  }
 
-    // Compute PID output
-    myPID.Compute();
+  if (screenIndex == 1) {
+    Input = readThermistor(offset); // Get temperature from thermistor
+    Setpoint = temperatura_buscada; 
+    output = pid(Setpoint - Input); // Use PID from first system for temperature control
 
-    // Time-proportional control logic for SSR (or LED)
     unsigned long now = millis();
     if (now - windowStartTime > windowSize) {
-      // Time to shift the Relay Window
       windowStartTime += windowSize;
     }
 
-    // Control the SSR (or LED) based on the PID output
-    if (Output > now - windowStartTime) {
-      digitalWrite(ssrPin, HIGH); // SSR (or LED) ON
+    if (output > (now - windowStartTime)) {
+      digitalWrite(ssrPin, HIGH); // Turn SSR on
     } else {
-      digitalWrite(ssrPin, LOW); // SSR (or LED) OFF
+      digitalWrite(ssrPin, LOW);  // Turn SSR off
     }
 
-    // Print PID Output and temperature readings to Serial Monitor for debugging
     Serial.print("PID Output: ");
-    Serial.println(Output);
+    Serial.println(output);
     Serial.print("Temperature: ");
-    Serial.println(temperature_read);
+    Serial.println(Input);
+  }
 
-    // Update LCD display with current temperature and setpoint
-    lcd.clear();
-    lcd.setCursor(0, 0);
-    lcd.print("Temp: ");
-    lcd.print(temperature_read, 2);
-    lcd.print(" C ");
-    lcd.setCursor(0, 1);
-    lcd.print("Set: ");
-    lcd.print(setpointTemperature, 1);
-    lcd.print(" C ");
+  // Ensure the motor is only controlled in start() and stop()
+  if (!isRunning) {
+    analogWrite(signalPin, 0);
+  }
 
-    delay(1000); // Update every second
+  delay(1000); 
+}
+
+void displayScreen() {
+  lcd.clear();
+//dani si lo estas leyendo... ya sabes
+  switch (screenIndex) {
+    case 0:  
+      lcd.print("Extrusora de");
+      lcd.setCursor(0, 1);
+      lcd.print("Plastico");
+      break;
+
+    case 1:  
+      lcd.print("T.A: ");
+      lcd.print(readThermistor(offset), 1);  
+      lcd.setCursor(0, 1);
+      lcd.print("T.B: ");
+      lcd.print(temperatura_buscada, 1); 
+      break;
+
+    case 2: 
+      lcd.print("Velocidad: ");
+      lcd.print(velocidad_motor); 
+      break;
+
+    case 3:  
+      lcd.print("Offset: ");
+      lcd.print(offset); 
+      break;
+
+    case 4: 
+      lcd.print("Comenzar?");
+      lcd.setCursor(0, 1);
+      lcd.print("Presionar Verde");
+      break;
+
+    case 5:  
+      lcd.print("Enrollar?");
+      break;
   }
 }
 
-// Function to read the thermistor and calculate temperature
-double readThermistor() {
-  int reading = analogRead(thermistorPin); // Read analog value from thermistor
-  float voltage = reading * (5.0 / 1023.0); // Convert reading to voltage
+double readThermistor(int offset) {
+  int reading = analogRead(thermistorPin);
+  float voltage = reading * (5.0 / 1023.0);
+  float temperature = -223.15 + (B / log((voltage * resistorFijo) / (A * (5.0 - voltage)))) - offset;
+  return temperature;
+}
 
-  // Calculate resistance of thermistor
-  float resistance = (voltage * resistorFijo) / (5.0 - voltage);
+// PID function from the first system
+double pid(double error) {
+  double proportional = error;
+  integral += error * dt;
+  double derivative = (error - previous) / dt;
+  previous = error;
+  double output = (Kp * proportional) + (Ki * integral) + (Kd * derivative);
+  return output;
+}
 
-  // Calculate temperature in Kelvin using the Steinhart-Hart equation or Beta coefficient method
-  float temperatureK = (B * 298.15) / (B + (298.15 * log(resistance / resistenciaNominal)));
+// Start function
+void start() {
+  isRunning = true;
+  lcd.clear();
+  lcd.print("Starting...");
 
-  // Convert Kelvin to Celsius
-  float temperatureC = temperatureK - 273.15;
+  Serial.println("--- Initial Values ---");
+  Serial.print("Setpoint Temperature: ");
+  Serial.println(temperatura_buscada);
+  Serial.print("Offset: ");
+  Serial.println(offset);
+  Serial.print("Motor Speed (RPM): ");
+  Serial.println(velocidad_motor);
+  Serial.println("-----------------------");
 
-  return temperatureC;
+  delay(5000);
+
+  myPID.SetMode(AUTOMATIC);
+  myPID.SetOutputLimits(0, windowSize);
+
+  bool temperatureStable = false;
+
+  // Stabilize temperature before starting the motor
+  while (!temperatureStable) {
+    Input = readThermistor(offset);
+    Setpoint = temperatura_buscada;
+    myPID.Compute();
+    
+    unsigned long now = millis();
+    static unsigned long windowStartTime = millis();
+    if (now - windowStartTime > 5000) {
+      windowStartTime += 5000; // Reset the 5-second window
+    }
+
+    if (Output > (now - windowStartTime)) {
+      digitalWrite(ssrPin, HIGH); // Turn SSR on
+    } else {
+      digitalWrite(ssrPin, LOW);  // Turn SSR off
+    }
+    delay(500);
+
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("T.B: ");
+    lcd.print(Setpoint);
+    lcd.setCursor(0, 1);
+    lcd.print("Temp: ");
+    lcd.print(Input, 1);
+
+    if (abs(Input - Setpoint) <= 5.0) { // Adjusted error margin
+      temperatureStable = true;
+      delay(500);
+    }
+  }
+  delay(5000);
+  while (isRunning) {
+    delay(1000);
+    analogWrite(signalPin, map(velocidad_motor, 0, 60, 0, 255));
+    nivelar(offset, temperatura_buscada);
+
+    if (digitalRead(redButtonPin) == LOW) {
+      isRunning = false;
+      stop();
+    }
+
+    delay(100);
+  }
+}
+
+// Stop function
+void stop() {
+  lcd.clear();
+  lcd.print("Parando");
+  digitalWrite(ssrPin, LOW);
+  analogWrite(signalPin, 0);
+  delay(2000);
+}
+
+void nivelar(int offset, int tb) {
+  int temperatura_buscada = tb;
+  Serial.println(tb);
+  Input = readThermistor(offset);
+  Setpoint = temperatura_buscada;
+  output = pid(Setpoint - Input); 
+  myPID.Compute();
 }
