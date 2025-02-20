@@ -1,23 +1,89 @@
-//Make sure to use a 103 ceramic capacitor of 10μf and a 4.7k ohm resistor for each 100k thermistor you have 
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
 
-#include <math.h>
-const int termistorPin = A0; // Pin donde se conecta el termistor
-const float resistenciaNominal = 100000; // 100k ohm a 25 grados Celsius
-const float resistorFijo = 4700; // 4700 ohmios
-const float B = 3950; // Constante B del termistor
-const float A = 0.176323; // Constante B del termistor
-const float offset = 47.0;
-void setup() {
-  Serial.begin(9600); // Iniciar comunicación serie
+LiquidCrystal_I2C lcd(0x27, 16, 2);
+
+const int selectButtonPin = 31;
+
+int screenIndex = 0;
+unsigned long lastButtonPress = 0;
+const int debounceDelay = 200; 
+
+void setupLCD() {
+  lcd.init();
+  lcd.backlight();
+  pinMode(selectButtonPin, INPUT_PULLUP);
 }
 
-void loop() {
-  leer_temperatura(offset);
+void checkScreenButton() {
+  if (digitalRead(selectButtonPin) == LOW) {
+    unsigned long currentTime = millis();
+    if (currentTime - lastButtonPress > debounceDelay) {
+      screenIndex++;
+      if (screenIndex > 5) {
+        screenIndex = 0;
+      }
+      lastButtonPress = currentTime;
+    }
+  }
 }
 
-float leer_temperatura(float offset) {
-  int reading = analogRead(termistorPin);
-  float voltaje = reading * (5.0 / 1023.0);
-  float temperatura = offset + (B / log((voltaje * resistorFijo) / (A * (5.0 - voltaje))));
-  return temperatura; 
+void updateScreen(float currentTemp, float targetTemp, int motorSpeed, int offsetValue, bool isRunning) {
+  lcd.clear();
+
+  switch (screenIndex) {
+    case 0:  
+      lcd.print("Extrusora de");
+      lcd.setCursor(0, 1);
+      lcd.print("Plastico");
+      break;
+
+    case 1: 
+      lcd.print("T.A: ");
+      lcd.print(currentTemp, 1);
+      lcd.setCursor(0, 1);
+      lcd.print("T.B: ");
+      lcd.print(targetTemp, 1);
+      break;
+
+    case 2:  
+      lcd.print("Velocidad: ");
+      lcd.print(motorSpeed);
+      break;
+
+    case 3: 
+      lcd.print("Offset: ");
+      lcd.print(offsetValue);
+      break;
+
+    case 4: 
+      lcd.print("Comenzar?");
+      lcd.setCursor(0, 1);
+      lcd.print("Presionar Verde");
+      break;
+
+    case 5:  
+      lcd.print("Enrollar?");
+      break;
+  }
+}
+
+void showStarting() {
+  lcd.clear();
+  lcd.print("Starting...");
+}
+
+void showStopping() {
+  lcd.clear();
+  lcd.print("Parando");
+}
+
+void showTempStabilization(float setpoint, float currentTemp) {
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("T.B: ");
+  lcd.print(setpoint);
+  lcd.setCursor(0, 1);
+  lcd.print("Temp: ");
+  lcd.print(currentTemp, 1);
 }
