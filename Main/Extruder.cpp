@@ -11,14 +11,17 @@ Cualquier modificacion deseada llamar a ZAVALETA lucaszavaleta10@gmail.com
 No modifique ninguna linea de codigo sin tener presente el conocimiento adecuado sobre los componentes de la maquina
 Ante cualquier duda comuniquese con el autor
 
+
+yeah dm me if you need any help through gmail
+i am NOT writing comments... just one
 */
+
 
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
 #include <math.h> 
 #include <PID_v1.h> 
 
-LiquidCrystal_I2C lcd(0x27, 16, 2); 
 
 const int thermistorPin = A1;  
 const int potPin = A4;        
@@ -28,181 +31,61 @@ const int greenButtonPin = 33;
 const int redButtonPin = 35;   
 const int signalPin = 11;      
 
-int screenIndex = 0;            
-float setpointTemperature = 30.0; 
-float temperatura_buscada = 25.0;
-int velocidad_motor = 0;
-int offset = 48;
-bool isRunning = false;         
+const int stepper1_stp = 45;
+const int stepper1_dir = 47;
+const int stepper1_ena = 43;
+const int stepper2_stp = 23;
+const int stepper2_dir = 41;
+const int stepper2_ena = 37;
+const int endstop1 = 23;
+const int endstop2 = 25;
 
-int potValueTemp = 0;
-int potValueMotor = 0;
-int potValueOffset = 0;
+unsigned long lastStep1Time = 0;
+unsigned long lastStep2Time = 0;
+const unsigned long stepDelay = 500;
+bool stepper2Direction = true;
 
-double Setpoint, Input, Output;
-double Kp = 2.0, Ki = 5.0, Kd = 1.0; // PID tuning parameters
-
-PID myPID(&Input, &Output, &Setpoint, Kp, Ki, Kd, DIRECT);
-
-const float A = 0.176323;
-const float B = 3950.0;
-const float resistorFijo = 4700.0;
-
-unsigned long windowStartTime;
-const unsigned long windowSize = 5000; // 1-second window
-
-// PID variables from the first code
-double dt, last_time;
-double integral, previous, output = 0;
 
 void setup() {
-  lcd.init();
-  lcd.backlight();
-
-  pinMode(selectButtonPin, INPUT_PULLUP);
-  pinMode(greenButtonPin, INPUT_PULLUP);
-  pinMode(redButtonPin, INPUT_PULLUP);
-  pinMode(ssrPin, OUTPUT);
-  pinMode(signalPin, OUTPUT);
-
-  Setpoint = setpointTemperature;
-  myPID.SetMode(AUTOMATIC);
-  myPID.SetOutputLimits(0, windowSize); 
-  myPID.SetSampleTime(1000);
-
-  windowStartTime = millis();
-  Serial.begin(9600);
+    pinMode(stepper1_stp, OUTPUT);
+  pinMode(stepper1_dir, OUTPUT);
+  pinMode(stepper1_ena, OUTPUT);
+  pinMode(stepper2_stp, OUTPUT);
+  pinMode(stepper2_dir, OUTPUT);
+  pinMode(stepper2_ena, OUTPUT);
+  pinMode(endstop1, INPUT_PULLUP);
+  pinMode(endstop2, INPUT_PULLUP);
+  
+  digitalWrite(stepper1_ena, LOW);
+  digitalWrite(stepper2_ena, LOW);
+  digitalWrite(stepper1_dir, HIGH);
+  digitalWrite(stepper2_dir, HIGH);
 }
 
-void loop() {
-  int selectButtonState = digitalRead(selectButtonPin);
-  if (selectButtonState == LOW) {
-    screenIndex++;  
-    if (screenIndex > 5) {
-      screenIndex = 0;
-    }
-    delay(200);  
+void controlSteppers() {
+  unsigned long currentTime = millis();
+  
+  if (currentTime - lastStep1Time >= stepDelay) {
+    digitalWrite(stepper1_stp, HIGH);
+    delayMicroseconds(100); // Short pulse
+    digitalWrite(stepper1_stp, LOW);
+    lastStep1Time = currentTime;
   }
-
-  int greenButtonState = digitalRead(greenButtonPin);
-  if (greenButtonState == LOW && screenIndex == 4 && !isRunning) {
-    isRunning = true;
-    start();
-    delay(200); 
-  }
-
-  int redButtonState = digitalRead(redButtonPin);
-  if (redButtonState == LOW && isRunning) {
-    isRunning = false;
-    stop(); 
-    delay(200); 
-  }
-
-  displayScreen();
-
-  if (screenIndex == 1 || screenIndex == 2 || screenIndex == 3) {
-    if (screenIndex == 1) {
-      potValueTemp = analogRead(potPin); 
-      temperatura_buscada = map(potValueTemp, 0, 1023, 0, 240); 
+  
+  if (currentTime - lastStep2Time >= stepDelay) {
+    if (digitalRead(endstop1) == LOW || digitalRead(endstop2) == LOW) {
+      stepper2Direction = !stepper2Direction; // Change direction
+      digitalWrite(stepper2_dir, stepper2Direction ? HIGH : LOW);
+      delay(10); // Small delay to ensure direction change
     }
-    if (screenIndex == 2) {
-      potValueMotor = analogRead(potPin);
-      velocidad_motor = map(potValueMotor, 0, 1023, 0, 60);  
-    }
-    if (screenIndex == 3) {
-      potValueOffset = analogRead(potPin);
-      offset = map(potValueOffset, 0, 1023, 0, 80); 
-    }
-  }
-
-  if (screenIndex == 1) {
-    Input = readThermistor(offset); // Get temperature from thermistor
-    Setpoint = temperatura_buscada; 
-    output = pid(Setpoint - Input); // Use PID from first system for temperature control
-
-    unsigned long now = millis();
-    if (now - windowStartTime > windowSize) {
-      windowStartTime += windowSize;
-    }
-
-    if (output > (now - windowStartTime)) {
-      digitalWrite(ssrPin, HIGH); // Turn SSR on
-    } else {
-      digitalWrite(ssrPin, LOW);  // Turn SSR off
-    }
-
-    Serial.print("PID Output: ");
-    Serial.println(output);
-    Serial.print("Temperature: ");
-    Serial.println(Input);
-  }
-
-  // Ensure the motor is only controlled in start() and stop()
-  if (!isRunning) {
-    analogWrite(signalPin, 0);
-  }
-
-  delay(1000); 
-}
-
-void displayScreen() {
-  lcd.clear();
-//dani si lo estas leyendo... ya sabes
-  switch (screenIndex) {
-    case 0:  
-      lcd.print("Extrusora de");
-      lcd.setCursor(0, 1);
-      lcd.print("Plastico");
-      break;
-
-    case 1:  
-      lcd.print("T.A: ");
-      lcd.print(readThermistor(offset), 1);  
-      lcd.setCursor(0, 1);
-      lcd.print("T.B: ");
-      lcd.print(temperatura_buscada, 1); 
-      break;
-
-    case 2: 
-      lcd.print("Velocidad: ");
-      lcd.print(velocidad_motor); 
-      break;
-
-    case 3:  
-      lcd.print("Offset: ");
-      lcd.print(offset); 
-      break;
-
-    case 4: 
-      lcd.print("Comenzar?");
-      lcd.setCursor(0, 1);
-      lcd.print("Presionar Verde");
-      break;
-
-    case 5:  
-      lcd.print("Enrollar?");
-      break;
+    
+    digitalWrite(stepper2_stp, HIGH);
+    delayMicroseconds(100);
+    digitalWrite(stepper2_stp, LOW);
+    lastStep2Time = currentTime;
   }
 }
 
-double readThermistor(int offset) {
-  int reading = analogRead(thermistorPin);
-  float voltage = reading * (5.0 / 1023.0);
-  float temperature = -223.15 + (B / log((voltage * resistorFijo) / (A * (5.0 - voltage)))) - offset;
-  return temperature;
-}
-
-// PID function from the first system
-double pid(double error) {
-  double proportional = error;
-  integral += error * dt;
-  double derivative = (error - previous) / dt;
-  previous = error;
-  double output = (Kp * proportional) + (Ki * integral) + (Kd * derivative);
-  return output;
-}
-
-// Start function
 void start() {
   isRunning = true;
   lcd.clear();
@@ -224,7 +107,6 @@ void start() {
 
   bool temperatureStable = false;
 
-  // Stabilize temperature before starting the motor
   while (!temperatureStable) {
     Input = readThermistor(offset);
     Setpoint = temperatura_buscada;
@@ -233,16 +115,15 @@ void start() {
     unsigned long now = millis();
     static unsigned long windowStartTime = millis();
     if (now - windowStartTime > 5000) {
-      windowStartTime += 5000; // Reset the 5-second window
+      windowStartTime += 5000;
     }
 
     if (Output > (now - windowStartTime)) {
-      digitalWrite(ssrPin, HIGH); // Turn SSR on
+      digitalWrite(ssrPin, HIGH);
     } else {
-      digitalWrite(ssrPin, LOW);  // Turn SSR off
+      digitalWrite(ssrPin, LOW);
     }
-    delay(500);
-
+    
     lcd.clear();
     lcd.setCursor(0, 0);
     lcd.print("T.B: ");
@@ -251,14 +132,18 @@ void start() {
     lcd.print("Temp: ");
     lcd.print(Input, 1);
 
-    if (abs(Input - Setpoint) <= 5.0) { // Adjusted error margin
+    if (abs(Input - Setpoint) <= 5.0) {
       temperatureStable = true;
       delay(500);
     }
+    
+    delay(500);
   }
+  
   delay(5000);
+  
   while (isRunning) {
-    delay(1000);
+    controlSteppers(); // Run stepper motors
     analogWrite(signalPin, map(velocidad_motor, 0, 60, 0, 255));
     nivelar(offset, temperatura_buscada);
 
@@ -271,12 +156,16 @@ void start() {
   }
 }
 
-// Stop function
 void stop() {
   lcd.clear();
   lcd.print("Parando");
   digitalWrite(ssrPin, LOW);
   analogWrite(signalPin, 0);
+  
+  // Disable stepper motors
+  digitalWrite(stepper1_ena, HIGH);
+  digitalWrite(stepper2_ena, HIGH);
+  
   delay(2000);
 }
 
@@ -285,6 +174,25 @@ void nivelar(int offset, int tb) {
   Serial.println(tb);
   Input = readThermistor(offset);
   Setpoint = temperatura_buscada;
-  output = pid(Setpoint - Input); 
   myPID.Compute();
+
+  unsigned long now = millis();
+  static unsigned long windowStartTime = millis();
+  if (now - windowStartTime > 5000) {
+    windowStartTime += 5000; 
+  }
+// goblin sin apencide la tiene adentro
+  if (Output > (now - windowStartTime)) {
+    digitalWrite(ssrPin, HIGH); 
+  } else {
+    digitalWrite(ssrPin, LOW); 
+  }
+  delay(500);
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("T.B: ");
+  lcd.print(Setpoint);
+  lcd.setCursor(0, 1);
+  lcd.print("Temp: ");
+  lcd.print(Input, 1);
 }
