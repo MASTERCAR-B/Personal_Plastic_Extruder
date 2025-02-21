@@ -181,7 +181,6 @@ void nivelar(int offset, int tb) {
   if (now - windowStartTime > 5000) {
     windowStartTime += 5000; 
   }
-// goblin sin apencide la tiene adentro
   if (Output > (now - windowStartTime)) {
     digitalWrite(ssrPin, HIGH); 
   } else {
