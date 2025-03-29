@@ -7,7 +7,7 @@
 
 https://github.com/MASTERCAR-B/Personal_Plastic_Extruder
 
-Cualquier modificacion deseada llamar a ZAVALETA lucaszavaleta10@gmail.com
+Cualquier modificacion deseada llamar a  @gmail.com
 No modifique ninguna linea de codigo sin tener presente el conocimiento adecuado sobre los componentes de la maquina
 Ante cualquier duda comuniquese con el autor
 
